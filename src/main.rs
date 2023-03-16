@@ -1,8 +1,13 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fs::File;
+use std::io;
 use std::path::Path;
+use std::path::PathBuf;
 use std::rc::Rc;
 
+use serde::Deserialize;
+use serde::Serialize;
 use structopt::StructOpt;
 
 // CLI interface to add/remove tasks from a graph database
@@ -16,22 +21,17 @@ use structopt::StructOpt;
 // - find the "next" (or set of next tasks) for a task
 
 fn main() -> anyhow::Result<()> {
-    let mut graph_file = std::env::current_dir()?;
-    graph_file.push("graph.json");
-
-    let mut graph = Graph::load(&graph_file)?;
-
     let opt = Opt::from_args();
+
+    let mut graph = Graph::load_default()?;
     graph = match opt {
         Opt::Add(args) => add(args, graph),
-	Opt::Connect(args) => connect(args, graph),
-	Opt::Edit(args) => edit(args, graph),
-	Opt::Show(args) => show(args, graph),
-	Opt::Next(args) => next(args, graph),
+        Opt::Connect(args) => connect(args, graph),
+        Opt::Edit(args) => edit(args, graph),
+        Opt::Show(args) => show(args, graph),
+        Opt::Next(args) => next(args, graph),
     }?;
-
-    graph.save(&graph_file)?;
-    Ok(())
+    graph.save_default()
 }
 
 fn add(args: AddArgs, graph: Graph) -> anyhow::Result<Graph> {
@@ -80,6 +80,7 @@ struct NextArgs {}
 
 type NodeID = usize;
 
+#[derive(Deserialize, Serialize)]
 pub struct Node {
     pub id: NodeID,
     pub title: String,
@@ -88,6 +89,7 @@ pub struct Node {
     pub due: Option<()>,
 }
 
+#[derive(Default, Deserialize, Serialize)]
 pub struct Graph {
     nodes: BTreeMap<NodeID, Rc<Node>>,
     roots: BTreeSet<NodeID>,
@@ -95,12 +97,32 @@ pub struct Graph {
 }
 
 impl Graph {
+    fn default_path() -> anyhow::Result<PathBuf> {
+        let mut graph_file = std::env::current_dir()?;
+        graph_file.push("graph.json");
+        Ok(graph_file)
+    }
+
+    pub fn load_default() -> anyhow::Result<Graph> {
+        Self::load(&Self::default_path()?)
+    }
+
     pub fn load(path: &Path) -> anyhow::Result<Graph> {
-        todo!()
+        let file = match File::open(path) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
+            x => x,
+        }?;
+        Ok(serde_json::from_reader::<_, Graph>(file)?)
+    }
+
+    pub fn save_default(&self) -> anyhow::Result<()> {
+	self.save(&Self::default_path()?)
     }
 
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
-        todo!()
+        let file = File::create(path)?;
+        serde_json::to_writer(file, self)?;
+        Ok(())
     }
 
     pub fn add(&mut self, node: Node) {
