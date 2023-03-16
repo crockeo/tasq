@@ -59,36 +59,34 @@ fn show(args: ShowArgs, graph: Graph) -> anyhow::Result<Graph> {
         graph.get_roots()
     };
 
-    for node in to_show.into_iter() {
-        show_subgraph(&graph, node)?;
+    for root in to_show.into_iter() {
+	for (node, depth) in graph.dfs(root)? {
+	    for _ in 0..2*depth {
+		print!(" ");
+	    }
+	    println!("{}", graph.get_node(node)?.short_repr());
+	}
     }
 
     Ok(graph)
 }
 
-fn show_subgraph(graph: &Graph, root: NodeID) -> anyhow::Result<()> {
-    let mut seen = BTreeSet::new();
-    let mut stack = vec![(root, 0)];
-    while stack.len() > 0 {
-        let (next, indentation) = stack.pop().unwrap();
-        if seen.contains(&next) {
-            continue;
-        }
-        seen.insert(next);
+fn next(args: NextArgs, graph: Graph) -> anyhow::Result<Graph> {
+    let to_next = if let Some(root_id) = args.root {
+        vec![root_id]
+    } else {
+        graph.get_roots()
+    };
 
-        for _ in 0..indentation {
-            print!(" ");
-        }
-        println!("{}", graph.get_node(next)?.short_repr());
-
-        // TODO: find next
+    for root in to_next.into_iter() {
+	for (node, _) in graph.dfs(root)? {
+	    if !graph.has_children(node)? {
+		println!("{}", graph.get_node(node)?.short_repr());
+	    }
+	}
     }
 
-    Ok(())
-}
-
-fn next(args: NextArgs, graph: Graph) -> anyhow::Result<Graph> {
-    todo!()
+    Ok(graph)
 }
 
 #[derive(Debug, StructOpt)]
@@ -119,7 +117,10 @@ struct ShowArgs {
 }
 
 #[derive(Debug, StructOpt)]
-struct NextArgs {}
+struct NextArgs {
+    #[structopt(short = "r", long = "root")]
+    root: Option<NodeID>,
+}
 
 type NodeID = Uuid;
 
@@ -152,7 +153,8 @@ impl Node {
 pub struct Graph {
     nodes: BTreeMap<NodeID, Rc<Node>>,
     roots: BTreeSet<NodeID>,
-    edges: BTreeMap<NodeID, NodeID>,
+    edges: BTreeMap<NodeID, BTreeSet<NodeID>>,
+    reverse_edges: BTreeMap<NodeID, BTreeSet<NodeID>>,
 }
 
 impl Graph {
@@ -192,7 +194,10 @@ impl Graph {
             return Err(anyhow!("Missing node {}", to.to_string()));
         }
 
-        self.edges.insert(from, to);
+        if !self.edges.contains_key(&from) {
+            self.edges.insert(from, BTreeSet::default());
+        }
+        self.edges.get_mut(&from).unwrap().insert(to);
         self.roots.remove(&to);
         Ok(())
     }
@@ -205,13 +210,67 @@ impl Graph {
             .clone())
     }
 
+    pub fn has_children(&self, id: NodeID) -> anyhow::Result<bool> {
+	self.exist_check(&id)?;
+	Ok(self.edges.contains_key(&id) && self.edges[&id].len() > 0)
+    }
+
+    pub fn get_children(&self, id: NodeID) -> anyhow::Result<BTreeSet<Uuid>> {
+	self.exist_check(&id)?;
+        let Some(children) = self.edges.get(&id) else {
+	    return Ok(BTreeSet::default());
+	};
+        Ok(children.clone())
+    }
+
     pub fn get_roots(&self) -> Vec<NodeID> {
         self.roots.iter().map(Uuid::clone).collect()
+    }
+
+    pub fn dfs(&self, root: NodeID) -> anyhow::Result<DFSIter<'_>> {
+        if !self.nodes.contains_key(&root) {
+            return Err(anyhow!("Missing node {}", root));
+        }
+
+        Ok(DFSIter {
+            graph: self,
+            seen: BTreeSet::default(),
+            stack: vec![(root, 0)],
+        })
+    }
+
+    fn exist_check(&self, id: &NodeID) -> anyhow::Result<()> {
+	if !self.nodes.contains_key(id) {
+	    return Err(anyhow!("Missing node {}", id));
+	}
+	Ok(())
     }
 
     fn default_path() -> anyhow::Result<PathBuf> {
         let mut graph_file = std::env::current_dir()?;
         graph_file.push("graph.json");
         Ok(graph_file)
+    }
+}
+
+pub struct DFSIter<'a> {
+    graph: &'a Graph,
+    seen: BTreeSet<NodeID>,
+    stack: Vec<(NodeID, usize)>,
+}
+
+impl<'a> Iterator for DFSIter<'a> {
+    type Item = (NodeID, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (next, depth) = self.stack.pop()?;
+        self.seen.insert(next.clone());
+        for child in self.graph.get_children(next).unwrap() {
+            if self.seen.contains(&child) {
+                continue;
+            }
+            self.stack.push((child, depth + 1));
+        }
+        Some((next, depth))
     }
 }
