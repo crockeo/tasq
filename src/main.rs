@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io;
 use std::path::Path;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::rc::Rc;
 
 use anyhow::anyhow;
@@ -39,7 +40,7 @@ fn main() -> anyhow::Result<()> {
 fn add(args: AddArgs, mut graph: Graph) -> anyhow::Result<Graph> {
     let node = Node::new();
     println!("{}", node.id.to_string());
-    graph.add(node);
+    graph.add(Rc::new(node));
     Ok(graph)
 }
 
@@ -48,8 +49,42 @@ fn connect(args: ConnectArgs, mut graph: Graph) -> anyhow::Result<Graph> {
     Ok(graph)
 }
 
-fn edit(args: EditArgs, graph: Graph) -> anyhow::Result<Graph> {
-    todo!()
+fn edit(args: EditArgs, mut graph: Graph) -> anyhow::Result<Graph> {
+    let editor = match std::env::var("EDITOR") {
+        Err(_) => "vi".to_string(),
+        Ok(editor) => editor,
+    };
+
+    let node = graph.get_node(args.node)?;
+
+    let temp_dir = tempfile::tempdir()?;
+    let mut filename = temp_dir.path().to_path_buf();
+    filename.push(format!("{}.json", node.id));
+
+    {
+        let file = File::create(&filename)?;
+        serde_json::to_writer_pretty::<_, Node>(file, &node)?;
+    };
+
+    let status = std::process::Command::new(editor)
+        .arg(&filename)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()?;
+
+    // If we fail to edit, just don't modify the graph.
+    if !status.success() {
+        return Ok(graph);
+    }
+
+    let node = {
+        let file = File::open(&filename)?;
+        serde_json::from_reader::<_, Rc<Node>>(file)?
+    };
+    graph.add(node);
+
+    Ok(graph)
 }
 
 fn show(args: ShowArgs, graph: Graph) -> anyhow::Result<Graph> {
@@ -60,12 +95,12 @@ fn show(args: ShowArgs, graph: Graph) -> anyhow::Result<Graph> {
     };
 
     for root in to_show.into_iter() {
-	for (node, depth) in graph.dfs(root)? {
-	    for _ in 0..2*depth {
-		print!(" ");
-	    }
-	    println!("{}", graph.get_node(node)?.short_repr());
-	}
+        for (node, depth) in graph.dfs(root)? {
+            for _ in 0..2 * depth {
+                print!(" ");
+            }
+            println!("{}", graph.get_node(node)?.short_repr());
+        }
     }
 
     Ok(graph)
@@ -79,11 +114,11 @@ fn next(args: NextArgs, graph: Graph) -> anyhow::Result<Graph> {
     };
 
     for root in to_next.into_iter() {
-	for (node, _) in graph.dfs(root)? {
-	    if !graph.has_children(node)? {
-		println!("{}", graph.get_node(node)?.short_repr());
-	    }
-	}
+        for (node, _) in graph.dfs(root)? {
+            if !graph.has_children(node)? {
+                println!("{}", graph.get_node(node)?.short_repr());
+            }
+        }
     }
 
     Ok(graph)
@@ -108,7 +143,9 @@ struct ConnectArgs {
 }
 
 #[derive(Debug, StructOpt)]
-struct EditArgs {}
+struct EditArgs {
+    node: NodeID,
+}
 
 #[derive(Debug, StructOpt)]
 struct ShowArgs {
@@ -180,8 +217,7 @@ impl Graph {
         Ok(())
     }
 
-    pub fn add(&mut self, node: Node) {
-        let node = Rc::new(node);
+    pub fn add(&mut self, node: Rc<Node>) {
         self.roots.insert(node.id);
         self.nodes.insert(node.id, node);
     }
@@ -211,12 +247,12 @@ impl Graph {
     }
 
     pub fn has_children(&self, id: NodeID) -> anyhow::Result<bool> {
-	self.exist_check(&id)?;
-	Ok(self.edges.contains_key(&id) && self.edges[&id].len() > 0)
+        self.exist_check(&id)?;
+        Ok(self.edges.contains_key(&id) && self.edges[&id].len() > 0)
     }
 
     pub fn get_children(&self, id: NodeID) -> anyhow::Result<BTreeSet<Uuid>> {
-	self.exist_check(&id)?;
+        self.exist_check(&id)?;
         let Some(children) = self.edges.get(&id) else {
 	    return Ok(BTreeSet::default());
 	};
@@ -240,10 +276,10 @@ impl Graph {
     }
 
     fn exist_check(&self, id: &NodeID) -> anyhow::Result<()> {
-	if !self.nodes.contains_key(id) {
-	    return Err(anyhow!("Missing node {}", id));
-	}
-	Ok(())
+        if !self.nodes.contains_key(id) {
+            return Err(anyhow!("Missing node {}", id));
+        }
+        Ok(())
     }
 
     fn default_path() -> anyhow::Result<PathBuf> {
