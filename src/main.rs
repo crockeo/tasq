@@ -16,16 +16,6 @@ use serde::Serialize;
 use structopt::StructOpt;
 use uuid::Uuid;
 
-// CLI interface to add/remove tasks from a graph database
-// and then find the next thing you should do for a particular set of tasks
-//
-// UI experience
-// - make node
-// - connect node to other node (unidirectional)
-// - edit node
-// - visualize a DAG
-// - find the "next" (or set of next tasks) for a task
-
 fn main() -> anyhow::Result<()> {
     let opt = Opt::from_args();
 
