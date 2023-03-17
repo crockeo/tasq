@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass
@@ -132,6 +133,19 @@ class Task:
             task.sub_tasks = task.load_subtasks(conn)
         return tasks
 
+    def create_in_tasq(self) -> str:
+        # create task
+        uuid = subprocess.check_output(
+            ("cargo", "run", "add", f"--title='{self.title}'", f"--description='{self.notes}'"),
+            text=True,
+        ).strip()
+        for task in self.sub_tasks:
+            sub_uuid = task.create_in_tasq()
+            subprocess.check_call(
+                ("cargo", "run", "connect", uuid, sub_uuid),
+            )
+        return uuid
+
 
 def main(args: list[str]) -> None:
     if not THINGS_DB_PATH.exists():
@@ -145,7 +159,7 @@ def main(args: list[str]) -> None:
 
     with sqlite3.connect(THINGS_DB_PATH) as conn:
         task = Task.load(conn, things_uuid)
-    print(task)
+    task.create_in_tasq()
 
 
 if __name__ == "__main__":
