@@ -8,6 +8,9 @@ use std::process::Stdio;
 use std::rc::Rc;
 
 use anyhow::anyhow;
+use chrono::serde::ts_seconds_option;
+use chrono::DateTime;
+use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use structopt::StructOpt;
@@ -38,8 +41,21 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn add(args: AddArgs, mut graph: Graph) -> anyhow::Result<Graph> {
-    let node = Node::new();
+    let mut node = Node::new();
+    if let Some(title) = args.title {
+        node.title = title;
+    }
+    if let Some(description) = args.description {
+        node.description = description;
+    }
+    if let Some(scheduled) = args.scheduled {
+        node.scheduled = Some(DateTime::from_local(scheduled, Utc));
+    }
+    if let Some(due) = args.due {
+        node.due = Some(DateTime::from_local(due, Utc));
+    }
     println!("{}", node.id.to_string());
+    println!("{}", serde_json::to_string_pretty(&node)?);
     graph.add(Rc::new(node));
     Ok(graph)
 }
@@ -134,7 +150,16 @@ enum Opt {
 }
 
 #[derive(Debug, StructOpt)]
-struct AddArgs {}
+struct AddArgs {
+    #[structopt(short = "t", long = "title")]
+    title: Option<String>,
+    #[structopt(short = "d", long = "description")]
+    description: Option<String>,
+    #[structopt(short = "s", long = "scheduled")]
+    scheduled: Option<chrono::NaiveDateTime>,
+    #[structopt(short = "e", long = "due")]
+    due: Option<chrono::NaiveDateTime>,
+}
 
 #[derive(Debug, StructOpt)]
 struct ConnectArgs {
@@ -166,8 +191,10 @@ pub struct Node {
     pub id: NodeID,
     pub title: String,
     pub description: String,
-    pub scheduled: Option<()>,
-    pub due: Option<()>,
+    #[serde(with = "ts_seconds_option")]
+    pub scheduled: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(with = "ts_seconds_option")]
+    pub due: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl Node {
