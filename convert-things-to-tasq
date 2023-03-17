@@ -134,7 +134,6 @@ class Task:
         return tasks
 
     def create_in_tasq(self) -> str:
-        # create task
         uuid = subprocess.check_output(
             ("cargo", "run", "add", f"--title='{self.title}'", f"--description='{self.notes}'"),
             text=True,
