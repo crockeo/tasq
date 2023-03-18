@@ -45,7 +45,6 @@ fn add(args: AddArgs, mut graph: Graph) -> anyhow::Result<Graph> {
         node.due = Some(DateTime::from_local(due, Utc));
     }
     println!("{}", node.id.to_string());
-    println!("{}", serde_json::to_string_pretty(&node)?);
     graph.add(Rc::new(node));
     Ok(graph)
 }
@@ -199,7 +198,7 @@ impl Node {
     }
 
     pub fn short_repr(&self) -> String {
-        self.id.to_string()
+	format!("{} ({})", self.title, self.id)
     }
 }
 

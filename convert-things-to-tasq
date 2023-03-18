@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import sqlite3
+import subprocess
+import sys
+import textwrap
+from dataclasses import dataclass
+from dataclasses import field
+from enum import Enum
+from pathlib import Path
+from typing import Any
+
+
+THINGS_DB_PATH = (
+    Path.home()
+    / "Library"
+    / "Group Containers"
+    / "JLMPQHK86H.com.culturedcode.ThingsMac"
+    / "Things Database.thingsdatabase"
+    / "main.sqlite"
+)
+
+
+def tasq_path() -> str:
+    # TODO: take a tasq binary from anywhere :)
+    return "./target/debug/tasq"
+
+
+def get_columns(cursor: sqlite3.Cursor) -> list[str]:
+    columns = []
+    for column_description in cursor.description:
+        columns.append(column_description[0])
+    return columns
+
+
+def load_areas_raw(
+    conn: sqlite3.Connection,
+    sql: str,
+    parameters: tuple[Any, ...],
+) -> list[Area]:
+    cursor = conn.execute(sql, parameters)
+    columns = get_columns(cursor)
+    areas = []
+    for row in cursor:
+        structured_row = {}
+        for i, column in enumerate(row):
+            structured_row[columns[i]] = column
+        areas.append(Area(**structured_row))
+    return areas
+
+
+def load_tasks_raw(
+    conn: sqlite3.Connection, sql: str, parameters: tuple[Any, ...]
+) -> list[Task]:
+    cursor = conn.execute(sql, parameters)
+    columns = get_columns(cursor)
+    tasks = []
+    for row in cursor:
+        structured_row = {}
+        for i, column in enumerate(row):
+            structured_row[columns[i]] = column
+        tasks.append(Task(**structured_row))
+    return tasks
+
+
+class Status(Enum):
+    Open = 0
+    Cancelled = 2
+    Done = 3
+
+
+@dataclass
+class Area:
+    uuid: str
+    title: str
+    visible: int
+    index: int
+    cachedTags: bytes
+
+    @staticmethod
+    def load(conn: sqlite3.Connection) -> list[Area]:
+        return load_areas_raw(
+            conn,
+            textwrap.dedent(
+                """\
+                    SELECT *
+                    FROM TMArea
+                """
+            ),
+            (),
+        )
+
+
+@dataclass
+class Task:
+    uuid: str
+    userModificationDate: float
+    creationDate: float
+    trashed: int
+    type: int
+    title: str
+    notes: str
+    dueDate: float
+    dueDateOffset: int
+    status: int
+    stopDate: float
+    start: int
+    startDate: float
+    index: int
+    todayIndex: int
+    area: str
+    project: str
+    repeatingTemplate: str
+    delegate: str
+    recurrenceRule: bytes
+    instanceCreationStartDate: float
+    instanceCreationPaused: int
+    instanceCreationCount: int
+    afterCompletionReferenceDate: float
+    actionGroup: str
+    untrashedLeafActionsCount: int
+    openUntrashedLeafActionsCount: int
+    checklistItemsCount: int
+    openChecklistItemsCount: int
+    startBucket: int
+    alarmTimeOffset: float
+    lastAlarmInteractionDate: float
+    todayIndexReferenceDate: float
+    nextInstanceStartDate: float
+    dueDateSuppressionDate: float
+    leavesTombstone: int
+    repeater: bytes
+    repeaterMigrationDate: float
+    repeaterRegularSlotDatesCache: bytes
+    notesSync: int
+    cachedTags: bytes
+
+    sub_tasks: list[Task] = field(default_factory=list)
+
+    @staticmethod
+    def load(conn: sqlite3.Connection) -> list[Task]:
+        return load_tasks_raw(
+            conn,
+            textwrap.dedent(
+                """\
+                    SELECT *
+                    FROM TMTask
+                """
+            ),
+            (),
+        )
+
+    def is_active(self) -> bool:
+        return (
+            not self.stopDate
+            and not self.trashed
+        )
+
+
+def connect(from_uuid: str, to_uuid: str) -> None:
+    subprocess.check_output(
+        (tasq_path(), "connect", from_uuid, to_uuid),
+    )
+
+
+def main(args: list[str]) -> None:
+    if not THINGS_DB_PATH.exists():
+        raise SystemExit("Things3 DB does not exist.")
+
+    with sqlite3.connect(THINGS_DB_PATH) as conn:
+        areas = Area.load(conn)
+        tasks = Task.load(conn)
+
+    tasks_by_id = {
+        task.uuid: task
+        for task in tasks
+    }
+    tasks = [
+        task
+        for task in tasks
+        if task.is_active()
+        if (not task.project or tasks_by_id[task.project].is_active())
+        if (not task.actionGroup or tasks_by_id[task.actionGroup].is_active())
+    ]
+
+    subprocess.check_call(
+        ("cargo", "build"),
+    )
+
+    area_by_things_uuid = {}
+    for i, area in enumerate(areas):
+        print(f"Adding area {i+1}/{len(areas)}...", file=sys.stderr)
+        tasq_uuid = subprocess.check_output(
+            (tasq_path(), "add", f"--title={area.title}"),
+            text=True,
+        ).strip()
+        area_by_things_uuid[area.uuid] = tasq_uuid
+
+    task_by_things_uuid = {}
+    for i, task in enumerate(tasks):
+        print(f"Adding task {i+1}/{len(tasks)}...", file=sys.stderr)
+        tasq_uuid = subprocess.check_output(
+            (
+                "./target/debug/tasq",
+                "add",
+                f"--title={task.title}",
+                f"--description={task.notes}",
+            ),
+            text=True,
+        ).strip()
+        task_by_things_uuid[task.uuid] = tasq_uuid
+
+    for i, task in enumerate(tasks):
+        print(f"Linking task {i+1}/{len(tasks)}...", file=sys.stderr)
+        tasq_uuid = task_by_things_uuid[task.uuid]
+        if task.area:
+            area_tasq_uuid = area_by_things_uuid[task.area]
+            connect(area_tasq_uuid, tasq_uuid)
+            continue
+
+        parent_uuid = task.project or task.actionGroup
+        if not parent_uuid:
+            continue
+
+        try:
+            parent_tasq_uuid = task_by_things_uuid[parent_uuid]
+        except KeyError:
+            print(f"Missing {parent_uuid}")
+            continue
+        connect(parent_tasq_uuid, tasq_uuid)
+
+
+if __name__ == "__main__":
+    main(sys.argv)
