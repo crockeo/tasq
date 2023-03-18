@@ -22,11 +22,32 @@ THINGS_DB_PATH = (
 )
 
 
+def tasq_path() -> str:
+    # TODO: take a tasq binary from anywhere :)
+    return "./target/debug/tasq"
+
+
 def get_columns(cursor: sqlite3.Cursor) -> list[str]:
     columns = []
     for column_description in cursor.description:
         columns.append(column_description[0])
     return columns
+
+
+def load_areas_raw(
+    conn: sqlite3.Connection,
+    sql: str,
+    parameters: tuple[Any, ...],
+) -> list[Area]:
+    cursor = conn.execute(sql, parameters)
+    columns = get_columns(cursor)
+    areas = []
+    for row in cursor:
+        structured_row = {}
+        for i, column in enumerate(row):
+            structured_row[columns[i]] = column
+        areas.append(Area(**structured_row))
+    return areas
 
 
 def load_tasks_raw(
@@ -50,115 +71,164 @@ class Status(Enum):
 
 
 @dataclass
+class Area:
+    uuid: str
+    title: str
+    visible: int
+    index: int
+    cachedTags: bytes
+
+    @staticmethod
+    def load(conn: sqlite3.Connection) -> list[Area]:
+        return load_areas_raw(
+            conn,
+            textwrap.dedent(
+                """\
+                    SELECT *
+                    FROM TMArea
+                """
+            ),
+            (),
+        )
+
+
+@dataclass
 class Task:
-    # TODO: convert some of these from unstructured to structured
-    uuid: Any
-    userModificationDate: Any
-    creationDate: Any
+    uuid: str
+    userModificationDate: float
+    creationDate: float
     trashed: int
-    type: Any
+    type: int
     title: str
     notes: str
-    dueDate: Any
-    dueDateOffset: Any
+    dueDate: float
+    dueDateOffset: int
     status: int
-    stopDate: Any
-    start: Any
-    startDate: Any
-    index: Any
-    todayIndex: Any
-    area: Any
-    project: Any
-    repeatingTemplate: Any
-    delegate: Any
-    recurrenceRule: Any
-    instanceCreationStartDate: Any
-    instanceCreationPaused: Any
-    instanceCreationCount: Any
-    afterCompletionReferenceDate: Any
-    actionGroup: Any
-    untrashedLeafActionsCount: Any
-    openUntrashedLeafActionsCount: Any
-    checklistItemsCount: Any
-    openChecklistItemsCount: Any
-    startBucket: Any
-    alarmTimeOffset: Any
-    lastAlarmInteractionDate: Any
-    todayIndexReferenceDate: Any
-    nextInstanceStartDate: Any
-    dueDateSuppressionDate: Any
-    leavesTombstone: Any
-    repeater: Any
-    repeaterMigrationDate: Any
-    repeaterRegularSlotDatesCache: Any
-    notesSync: Any
-    cachedTags: Any
+    stopDate: float
+    start: int
+    startDate: float
+    index: int
+    todayIndex: int
+    area: str
+    project: str
+    repeatingTemplate: str
+    delegate: str
+    recurrenceRule: bytes
+    instanceCreationStartDate: float
+    instanceCreationPaused: int
+    instanceCreationCount: int
+    afterCompletionReferenceDate: float
+    actionGroup: str
+    untrashedLeafActionsCount: int
+    openUntrashedLeafActionsCount: int
+    checklistItemsCount: int
+    openChecklistItemsCount: int
+    startBucket: int
+    alarmTimeOffset: float
+    lastAlarmInteractionDate: float
+    todayIndexReferenceDate: float
+    nextInstanceStartDate: float
+    dueDateSuppressionDate: float
+    leavesTombstone: int
+    repeater: bytes
+    repeaterMigrationDate: float
+    repeaterRegularSlotDatesCache: bytes
+    notesSync: int
+    cachedTags: bytes
 
     sub_tasks: list[Task] = field(default_factory=list)
 
     @staticmethod
-    def load(conn: sqlite3.Connection, uuid: str) -> Task:
-        tasks = load_tasks_raw(
+    def load(conn: sqlite3.Connection) -> list[Task]:
+        return load_tasks_raw(
             conn,
             textwrap.dedent(
                 """\
                     SELECT *
                     FROM TMTask
-                    WHERE uuid = ?
-                    ORDER BY "index" ASC
                 """
             ),
-            (uuid,),
+            (),
         )
-        if len(tasks) != 1:
-            raise Exception(f"failed to find task with uuid {uuid}")
-        task = tasks[0]
-        task.sub_tasks = task.load_subtasks(conn)
-        return task
 
-    def load_subtasks(self, conn: sqlite3.Connection) -> list[Task]:
-        tasks = load_tasks_raw(
-            conn,
-            textwrap.dedent(
-                """\
-                    SELECT *
-                    FROM TMTask
-                    WHERE project = ? OR actionGroup = ?
-                    ORDER BY "index" ASC
-                """
-            ),
-            (self.uuid, self.uuid),
-        )
-        for task in tasks:
-            task.sub_tasks = task.load_subtasks(conn)
-        return tasks
 
-    def create_in_tasq(self) -> str:
-        uuid = subprocess.check_output(
-            ("cargo", "run", "add", f"--title='{self.title}'", f"--description='{self.notes}'"),
-            text=True,
-        ).strip()
-        for task in self.sub_tasks:
-            sub_uuid = task.create_in_tasq()
-            subprocess.check_call(
-                ("cargo", "run", "connect", uuid, sub_uuid),
-            )
-        return uuid
+def connect(from_uuid: str, to_uuid: str) -> None:
+    subprocess.check_output(
+        (tasq_path(), "connect", from_uuid, to_uuid),
+    )
 
 
 def main(args: list[str]) -> None:
     if not THINGS_DB_PATH.exists():
         raise SystemExit("Things3 DB does not exist.")
 
-    if len(args) != 2:
-        raise SystemExit("Usage: convert-things-to-tasq <things URL>")
-
-    things_uuid = args[1]
-    things_uuid = things_uuid[len("things:///show?id=") :]
-
     with sqlite3.connect(THINGS_DB_PATH) as conn:
-        task = Task.load(conn, things_uuid)
-    task.create_in_tasq()
+        areas = Area.load(conn)
+        tasks = Task.load(conn)
+
+    task_by_uuid = {}
+    alone = []
+    to_area = []
+    to_project = []
+    to_header = []
+    for task in tasks:
+        task_by_uuid[task.uuid] = task
+        if task.area:
+            to_area.append(task)
+            continue
+        if task.project:
+            to_project.append(task)
+            continue
+        if task.actionGroup:
+            to_header.append(task)
+            continue
+        alone.append(task)
+
+    subprocess.check_call(
+        ("cargo", "build"),
+    )
+
+    area_by_things_uuid = {}
+    for i, area in enumerate(areas):
+        print(f"Adding area {i+1}/{len(areas)}...", file=sys.stderr)
+        tasq_uuid = subprocess.check_output(
+            (tasq_path(), "add", f"--title={area.title}"),
+            text=True,
+        ).strip()
+        area_by_things_uuid[area.uuid] = tasq_uuid
+
+    task_by_things_uuid = {}
+    for i, task in enumerate(tasks):
+        print(f"Adding task {i+1}/{len(tasks)}...", file=sys.stderr)
+        tasq_uuid = subprocess.check_output(
+            (
+                "./target/debug/tasq",
+                "add",
+                f"--title={task.title}",
+                f"--description={task.notes}",
+            ),
+            text=True,
+        ).strip()
+        task_by_things_uuid[task.uuid] = tasq_uuid
+
+    for i, task in enumerate(tasks):
+        print(f"Linking task {i+1}/{len(tasks)}...", file=sys.stderr)
+        tasq_uuid = task_by_things_uuid[task.uuid]
+        if task.area:
+            area_tasq_uuid = area_by_things_uuid[task.area]
+            connect(area_tasq_uuid, tasq_uuid)
+            continue
+
+        parent_uuid = task.project or task.actionGroup
+        if not parent_uuid:
+            continue
+
+        try:
+            parent_tasq_uuid = task_by_things_uuid[parent_uuid]
+        except KeyError:
+            print(f"Missing {parent_uuid}")
+            continue
+        connect(parent_tasq_uuid, tasq_uuid)
 
 
 if __name__ == "__main__":

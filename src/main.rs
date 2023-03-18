@@ -45,7 +45,6 @@ fn add(args: AddArgs, mut graph: Graph) -> anyhow::Result<Graph> {
         node.due = Some(DateTime::from_local(due, Utc));
     }
     println!("{}", node.id.to_string());
-    eprintln!("{}", serde_json::to_string_pretty(&node)?);
     graph.add(Rc::new(node));
     Ok(graph)
 }
