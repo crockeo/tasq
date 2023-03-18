@@ -1,5 +1,3 @@
-#![feature(async_fn_in_trait)]
-
 use std::fs::File;
 use std::process::Stdio;
 use std::rc::Rc;
