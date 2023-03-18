@@ -151,6 +151,12 @@ class Task:
             (),
         )
 
+    def is_active(self) -> bool:
+        return (
+            not self.stopDate
+            and not self.trashed
+        )
+
 
 def connect(from_uuid: str, to_uuid: str) -> None:
     subprocess.check_output(
@@ -166,23 +172,17 @@ def main(args: list[str]) -> None:
         areas = Area.load(conn)
         tasks = Task.load(conn)
 
-    task_by_uuid = {}
-    alone = []
-    to_area = []
-    to_project = []
-    to_header = []
-    for task in tasks:
-        task_by_uuid[task.uuid] = task
-        if task.area:
-            to_area.append(task)
-            continue
-        if task.project:
-            to_project.append(task)
-            continue
-        if task.actionGroup:
-            to_header.append(task)
-            continue
-        alone.append(task)
+    tasks_by_id = {
+        task.uuid: task
+        for task in tasks
+    }
+    tasks = [
+        task
+        for task in tasks
+        if task.is_active()
+        if (not task.project or tasks_by_id[task.project].is_active())
+        if (not task.actionGroup or tasks_by_id[task.actionGroup].is_active())
+    ]
 
     subprocess.check_call(
         ("cargo", "build"),
