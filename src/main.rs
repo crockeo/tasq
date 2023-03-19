@@ -27,7 +27,7 @@ async fn async_main() -> anyhow::Result<()> {
         Opt::Edit(args) => edit(args, database).await,
         Opt::Show(args) => show(args, database).await,
         Opt::Next(args) => next(args, database).await,
-	Opt::UI => ui::main(database).await,
+        Opt::UI => ui::main(database).await,
     }?;
     Ok(())
 }
@@ -122,8 +122,8 @@ async fn next(args: NextArgs, database: db::Database) -> anyhow::Result<()> {
     };
 
     for root in to_next.into_iter() {
-	let mut dfs = database.dfs(root).await?;
-	while let Some((node, _)) = dfs.next().await? {
+        let mut dfs = database.dfs(root).await?;
+        while let Some((node, _)) = dfs.next().await? {
             if !database.has_children(node).await? {
                 println!("{}", database.get_node(node).await?.short_repr());
             }

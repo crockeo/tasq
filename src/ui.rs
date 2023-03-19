@@ -50,7 +50,7 @@ pub async fn main(database: db::Database) -> anyhow::Result<()> {
 
         let block = Block::default().title("Block").borders(Borders::ALL);
 
-	f.render_stateful_widget(list, parts[0], &mut list_state);
+        f.render_stateful_widget(list, parts[0], &mut list_state);
         f.render_widget(block, parts[1]);
     })?;
 
