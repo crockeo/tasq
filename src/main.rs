@@ -11,6 +11,7 @@ use db::Node;
 use db::NodeID;
 
 mod db;
+mod ui;
 
 fn main() -> anyhow::Result<()> {
     async_std::task::block_on(async_main())
@@ -26,6 +27,7 @@ async fn async_main() -> anyhow::Result<()> {
         Opt::Edit(args) => edit(args, database).await,
         Opt::Show(args) => show(args, database).await,
         Opt::Next(args) => next(args, database).await,
+	Opt::UI => ui::main(database).await,
     }?;
     Ok(())
 }
@@ -138,6 +140,7 @@ enum Opt {
     Edit(EditArgs),
     Show(ShowArgs),
     Next(NextArgs),
+    UI,
 }
 
 #[derive(Debug, StructOpt)]
