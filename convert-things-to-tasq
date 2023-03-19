@@ -182,6 +182,7 @@ def main(args: list[str]) -> None:
         if task.is_active()
         if (not task.project or tasks_by_id[task.project].is_active())
         if (not task.actionGroup or tasks_by_id[task.actionGroup].is_active())
+        if not task.recurrenceRule
     ]
 
     subprocess.check_call(
