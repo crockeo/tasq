@@ -72,7 +72,9 @@ impl Database {
             .bind(&node.title)
             .bind(&node.description)
             .bind(node.scheduled.map(|dt| dt.timestamp_millis()))
-            .bind(node.due.map(|dt| dt.timestamp_millis()));
+            .bind(node.due.map(|dt| dt.timestamp_millis()))
+            .bind(node.completed.map(|dt| dt.timestamp_millis()))
+            .bind(node.trashed);
         query.execute(&mut self.pool.acquire().await?).await?;
         Ok(())
     }
@@ -86,6 +88,8 @@ impl Database {
             .bind(&node.description)
             .bind(node.scheduled.map(|dt| dt.timestamp_millis()))
             .bind(node.due.map(|dt| dt.timestamp_millis()))
+            .bind(node.completed.map(|dt| dt.timestamp_millis()))
+            .bind(node.trashed)
             .bind(node.id.to_string());
         query.execute(&mut self.pool.acquire().await?).await?;
         Ok(())
@@ -204,6 +208,9 @@ pub struct Node {
     pub scheduled: Option<DateTime<Utc>>,
     #[serde(with = "ts_seconds_option")]
     pub due: Option<DateTime<Utc>>,
+    #[serde(with = "ts_seconds_option")]
+    pub completed: Option<DateTime<Utc>>,
+    pub trashed: bool,
 }
 
 impl Node {
@@ -214,6 +221,8 @@ impl Node {
             description: "".to_string(),
             scheduled: None,
             due: None,
+            completed: None,
+            trashed: false,
         }
     }
 
@@ -232,6 +241,8 @@ impl TryFrom<SqliteRow> for Node {
             description: value.get("description"),
             scheduled: date_time_from_timestamp(value.get("scheduled"))?,
             due: date_time_from_timestamp(value.get("due"))?,
+            completed: date_time_from_timestamp(value.get("completed"))?,
+            trashed: value.get("trashed"),
         })
     }
 }

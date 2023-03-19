@@ -3,8 +3,12 @@ INSERT INTO nodes (
        title,
        description,
        scheduled,
-       due
+       due,
+       completed,
+       trashed
 ) VALUES (
+       ?,
+       ?,
        ?,
        ?,
        ?,

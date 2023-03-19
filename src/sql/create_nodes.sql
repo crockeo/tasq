@@ -3,5 +3,7 @@ CREATE TABLE nodes (
        title TEXT,
        description TEXT,
        scheduled REAL,
-       due REAL
+       due REAL,
+       completed REAL,
+       trashed BIT
 );
