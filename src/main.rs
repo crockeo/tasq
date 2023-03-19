@@ -25,11 +25,33 @@ async fn async_main() -> anyhow::Result<()> {
         Opt::Add(args) => add(args, database).await,
         Opt::Connect(args) => connect(args, database).await,
         Opt::Edit(args) => edit(args, database).await,
-        Opt::Show(args) => show(args, database).await,
         Opt::Next(args) => next(args, database).await,
+        Opt::Show(args) => show(args, database).await,
         Opt::UI => ui::main(database).await,
     }?;
     Ok(())
+}
+
+#[derive(Debug, StructOpt)]
+enum Opt {
+    Add(AddArgs),
+    Connect(ConnectArgs),
+    Edit(EditArgs),
+    Show(ShowArgs),
+    Next(NextArgs),
+    UI,
+}
+
+#[derive(Debug, StructOpt)]
+struct AddArgs {
+    #[structopt(short = "t", long = "title")]
+    title: Option<String>,
+    #[structopt(short = "d", long = "description")]
+    description: Option<String>,
+    #[structopt(short = "s", long = "scheduled")]
+    scheduled: Option<chrono::NaiveDateTime>,
+    #[structopt(short = "e", long = "due")]
+    due: Option<chrono::NaiveDateTime>,
 }
 
 async fn add(args: AddArgs, database: db::Database) -> anyhow::Result<()> {
@@ -51,9 +73,20 @@ async fn add(args: AddArgs, database: db::Database) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[derive(Debug, StructOpt)]
+struct ConnectArgs {
+    from: Uuid,
+    to: Uuid,
+}
+
 async fn connect(args: ConnectArgs, database: db::Database) -> anyhow::Result<()> {
     database.connect(args.from, args.to).await?;
     Ok(())
+}
+
+#[derive(Debug, StructOpt)]
+struct EditArgs {
+    node: NodeID,
 }
 
 async fn edit(args: EditArgs, database: db::Database) -> anyhow::Result<()> {
@@ -94,24 +127,10 @@ async fn edit(args: EditArgs, database: db::Database) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn show(args: ShowArgs, database: db::Database) -> anyhow::Result<()> {
-    let to_show = if let Some(root_id) = args.root {
-        vec![root_id]
-    } else {
-        database.get_roots().await?
-    };
-
-    for root in to_show.into_iter() {
-        let mut dfs = database.dfs(root).await?;
-        while let Some((node, depth)) = dfs.next().await? {
-            for _ in 0..2 * depth {
-                print!(" ");
-            }
-            println!("{}", database.get_node(node).await?.short_repr());
-        }
-    }
-
-    Ok(())
+#[derive(Debug, StructOpt)]
+struct NextArgs {
+    #[structopt(short = "r", long = "root")]
+    root: Option<NodeID>,
 }
 
 async fn next(args: NextArgs, database: db::Database) -> anyhow::Result<()> {
@@ -134,46 +153,27 @@ async fn next(args: NextArgs, database: db::Database) -> anyhow::Result<()> {
 }
 
 #[derive(Debug, StructOpt)]
-enum Opt {
-    Add(AddArgs),
-    Connect(ConnectArgs),
-    Edit(EditArgs),
-    Show(ShowArgs),
-    Next(NextArgs),
-    UI,
-}
-
-#[derive(Debug, StructOpt)]
-struct AddArgs {
-    #[structopt(short = "t", long = "title")]
-    title: Option<String>,
-    #[structopt(short = "d", long = "description")]
-    description: Option<String>,
-    #[structopt(short = "s", long = "scheduled")]
-    scheduled: Option<chrono::NaiveDateTime>,
-    #[structopt(short = "e", long = "due")]
-    due: Option<chrono::NaiveDateTime>,
-}
-
-#[derive(Debug, StructOpt)]
-struct ConnectArgs {
-    from: Uuid,
-    to: Uuid,
-}
-
-#[derive(Debug, StructOpt)]
-struct EditArgs {
-    node: NodeID,
-}
-
-#[derive(Debug, StructOpt)]
 struct ShowArgs {
     #[structopt(short = "r", long = "root")]
     root: Option<NodeID>,
 }
 
-#[derive(Debug, StructOpt)]
-struct NextArgs {
-    #[structopt(short = "r", long = "root")]
-    root: Option<NodeID>,
+async fn show(args: ShowArgs, database: db::Database) -> anyhow::Result<()> {
+    let to_show = if let Some(root_id) = args.root {
+        vec![root_id]
+    } else {
+        database.get_roots().await?
+    };
+
+    for root in to_show.into_iter() {
+        let mut dfs = database.dfs(root).await?;
+        while let Some((node, depth)) = dfs.next().await? {
+            for _ in 0..2 * depth {
+                print!(" ");
+            }
+            println!("{}", database.get_node(node).await?.short_repr());
+        }
+    }
+
+    Ok(())
 }
