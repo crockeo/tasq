@@ -87,7 +87,7 @@ async fn edit(args: EditArgs, database: db::Database) -> anyhow::Result<()> {
         let file = File::open(&filename)?;
         serde_json::from_reader::<_, Rc<Node>>(file)?
     };
-    database.add(&node).await?;
+    database.update(&node).await?;
 
     Ok(())
 }

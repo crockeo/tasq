@@ -98,12 +98,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-iterator"
-version = "2.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4743f74e5921bfd11bee0824e539e7ec2a1c21e2505b09615ce2c1f0c58594a"
-
-[[package]]
 name = "async-lock"
 version = "2.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1454,7 +1448,6 @@ name = "tasq"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-iterator",
  "async-std",
  "chrono",
  "serde",

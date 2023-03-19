@@ -3,7 +3,6 @@ use std::fs::File;
 use std::path::Path;
 
 use anyhow::anyhow;
-use async_iterator::Iterator;
 use async_std::sync::Mutex;
 use chrono::serde::ts_seconds_option;
 use chrono::DateTime;
@@ -72,6 +71,21 @@ impl Database {
             .bind(&node.description)
             .bind(node.scheduled.map(|dt| dt.timestamp_millis()))
             .bind(node.due.map(|dt| dt.timestamp_millis()));
+        query.execute(&mut *conn).await?;
+        Ok(())
+    }
+
+    pub async fn update(&self, node: &Node) -> anyhow::Result<()> {
+        self.exists_check(&node.id).await?;
+
+        let mut conn = self.conn.lock().await;
+        let query_str = std::include_str!("sql/insert_node.sql");
+        let query = sqlx::query(query_str)
+            .bind(&node.title)
+            .bind(&node.description)
+            .bind(node.scheduled.map(|dt| dt.timestamp_millis()))
+            .bind(node.due.map(|dt| dt.timestamp_millis()))
+            .bind(node.id.to_string());
         query.execute(&mut *conn).await?;
         Ok(())
     }
@@ -168,17 +182,17 @@ pub struct DFSIter<'a> {
 
 impl<'a> DFSIter<'a> {
     pub async fn next(&mut self) -> anyhow::Result<Option<(NodeID, usize)>> {
-	let Some((next, depth)) = self.stack.pop() else {
+        let Some((next, depth)) = self.stack.pop() else {
 	    return Ok(None);
 	};
-	self.seen.insert(next.clone());
-	for child in self.database.get_children(next).await? {
-	    if self.seen.contains(&child) {
-		continue;
-	    }
-	    self.stack.push((child, depth + 1));
-	}
-	Ok(Some((next, depth)))
+        self.seen.insert(next.clone());
+        for child in self.database.get_children(next).await? {
+            if self.seen.contains(&child) {
+                continue;
+            }
+            self.stack.push((child, depth + 1));
+        }
+        Ok(Some((next, depth)))
     }
 }
 
