@@ -3,7 +3,6 @@ use std::fs::File;
 use std::path::Path;
 
 use anyhow::anyhow;
-use async_std::sync::Mutex;
 use chrono::serde::ts_seconds_option;
 use chrono::DateTime;
 use chrono::LocalResult;
@@ -12,14 +11,14 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::sqlite::SqliteConnection;
+use sqlx::sqlite::SqlitePool;
+use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::sqlite::SqliteRow;
-use sqlx::ConnectOptions;
 use sqlx::Row;
 use uuid::Uuid;
 
 pub struct Database {
-    conn: Mutex<SqliteConnection>,
+    pool: SqlitePool,
 }
 
 impl Database {
@@ -37,9 +36,11 @@ impl Database {
             File::create(path)?;
         }
 
-        let db = Self {
-            conn: Mutex::new(SqliteConnectOptions::new().filename(path).connect().await?),
-        };
+        let pool = SqlitePoolOptions::new()
+            .connect_with(SqliteConnectOptions::new().filename(path))
+            .await?;
+
+        let db = Self { pool };
         if create_tables {
             db.create_nodes_table().await?;
             db.create_edges_table().await?;
@@ -49,21 +50,22 @@ impl Database {
     }
 
     async fn create_nodes_table(&self) -> anyhow::Result<()> {
-        let mut conn = self.conn.lock().await;
         let contents = std::include_str!("sql/create_nodes.sql");
-        sqlx::query(contents).execute(&mut *conn).await?;
+        sqlx::query(contents)
+            .execute(&mut self.pool.acquire().await?)
+            .await?;
         Ok(())
     }
 
     async fn create_edges_table(&self) -> anyhow::Result<()> {
-        let mut conn = self.conn.lock().await;
         let contents = std::include_str!("sql/create_edges.sql");
-        sqlx::query(contents).execute(&mut *conn).await?;
+        sqlx::query(contents)
+            .execute(&mut self.pool.acquire().await?)
+            .await?;
         Ok(())
     }
 
     pub async fn add(&self, node: &Node) -> anyhow::Result<()> {
-        let mut conn = self.conn.lock().await;
         let query_str = std::include_str!("sql/insert_node.sql");
         let query = sqlx::query(query_str)
             .bind(node.id.to_string())
@@ -71,14 +73,13 @@ impl Database {
             .bind(&node.description)
             .bind(node.scheduled.map(|dt| dt.timestamp_millis()))
             .bind(node.due.map(|dt| dt.timestamp_millis()));
-        query.execute(&mut *conn).await?;
+        query.execute(&mut self.pool.acquire().await?).await?;
         Ok(())
     }
 
     pub async fn update(&self, node: &Node) -> anyhow::Result<()> {
         self.exists_check(&node.id).await?;
 
-        let mut conn = self.conn.lock().await;
         let query_str = std::include_str!("sql/insert_node.sql");
         let query = sqlx::query(query_str)
             .bind(&node.title)
@@ -86,7 +87,7 @@ impl Database {
             .bind(node.scheduled.map(|dt| dt.timestamp_millis()))
             .bind(node.due.map(|dt| dt.timestamp_millis()))
             .bind(node.id.to_string());
-        query.execute(&mut *conn).await?;
+        query.execute(&mut self.pool.acquire().await?).await?;
         Ok(())
     }
 
@@ -94,40 +95,36 @@ impl Database {
         self.exists_check(&from).await?;
         self.exists_check(&to).await?;
 
-        let mut conn = self.conn.lock().await;
         let query_str = std::include_str!("sql/connect_nodes.sql");
         let query = sqlx::query(query_str)
             .bind(from.to_string())
             .bind(to.to_string());
-        query.execute(&mut *conn).await?;
+        query.execute(&mut self.pool.acquire().await?).await?;
         Ok(())
     }
 
     pub async fn get_node(&self, id: NodeID) -> anyhow::Result<Node> {
-        let mut conn = self.conn.lock().await;
         let row = sqlx::query("SELECT * FROM nodes WHERE uuid = ?")
             .bind(id.to_string())
-            .fetch_one(&mut *conn)
+            .fetch_one(&mut self.pool.acquire().await?)
             .await?;
         row.try_into()
     }
 
     pub async fn has_children(&self, id: NodeID) -> anyhow::Result<bool> {
-        let mut conn = self.conn.lock().await;
         let count = sqlx::query("SELECT COUNT(*) FROM edges WHERE from_uuid = ?")
             .bind(id.to_string())
-            .fetch_one(&mut *conn)
+            .fetch_one(&mut self.pool.acquire().await?)
             .await?;
         let count: i64 = count.get(0);
         Ok(count > 0)
     }
 
     pub async fn get_children(&self, id: NodeID) -> anyhow::Result<Vec<Uuid>> {
-        let mut conn = self.conn.lock().await;
         let query_str = std::include_str!("sql/get_children.sql");
         let children = sqlx::query(query_str)
             .bind(id.to_string())
-            .fetch_all(&mut *conn)
+            .fetch_all(&mut self.pool.acquire().await?)
             .await?;
 
         let children = children
@@ -139,9 +136,10 @@ impl Database {
     }
 
     pub async fn get_roots(&self) -> anyhow::Result<Vec<NodeID>> {
-        let mut conn = self.conn.lock().await;
         let query_str = std::include_str!("sql/get_roots.sql");
-        let roots = sqlx::query(query_str).fetch_all(&mut *conn).await?;
+        let roots = sqlx::query(query_str)
+            .fetch_all(&mut self.pool.acquire().await?)
+            .await?;
 
         let roots = roots
             .into_iter()
@@ -162,10 +160,9 @@ impl Database {
     }
 
     async fn exists_check(&self, id: &NodeID) -> anyhow::Result<()> {
-        let mut conn = self.conn.lock().await;
         let nodes = sqlx::query("SELECT * FROM nodes WHERE uuid = ?")
             .bind(id.to_string())
-            .fetch_all(&mut *conn)
+            .fetch_all(&mut self.pool.acquire().await?)
             .await?;
         if nodes.len() == 0 {
             return Err(anyhow!("Missing node {}", id));
