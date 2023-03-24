@@ -11,6 +11,7 @@ use db::Node;
 use db::NodeID;
 
 mod db;
+mod find;
 mod ui;
 
 fn main() -> anyhow::Result<()> {
@@ -25,7 +26,7 @@ async fn async_main() -> anyhow::Result<()> {
         Opt::Add(args) => add(args, database).await,
         Opt::Connect(args) => connect(args, database).await,
         Opt::Edit(args) => edit(args, database).await,
-        Opt::Find(args) => find(args, database).await,
+        Opt::Find(args) => find::main(args, database).await,
         Opt::Next(args) => next(args, database).await,
         Opt::Show(args) => show(args, database).await,
         Opt::UI => ui::main(database).await,
@@ -38,7 +39,7 @@ enum Opt {
     Add(AddArgs),
     Connect(ConnectArgs),
     Edit(EditArgs),
-    Find(FindArgs),
+    Find(find::Args),
     Show(ShowArgs),
     Next(NextArgs),
     UI,
@@ -125,27 +126,6 @@ async fn edit(args: EditArgs, database: db::Database) -> anyhow::Result<()> {
         serde_json::from_reader::<_, Rc<Node>>(file)?
     };
     database.update(&node).await?;
-
-    Ok(())
-}
-
-#[derive(Debug, StructOpt)]
-struct FindArgs {
-    text: String,
-}
-
-async fn find(args: FindArgs, database: db::Database) -> anyhow::Result<()> {
-    // (1) find all active nodes in the database
-    // (2) for each node's title, run a fuzzy find against the args
-    // (3) come up with some kind of confidence value based on fuzzy search
-    //   (a) be ok with insertions b/c someone could be writing parts of a word
-    //   (b) don't be ok with a lot of deletions / replacements
-    //       b/c that means they're probably typing something else
-    //   (c) also simimlar thing for replacement cost
-    // (4) filter to only show things which are above a certain level of confidence
-    //
-    // also maybe include configurability here, so folks can tune their own preferences
-    todo!();
 
     Ok(())
 }
