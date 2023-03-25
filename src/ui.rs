@@ -10,11 +10,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
 use ratatui::layout::Layout;
-use ratatui::widgets::Block;
-use ratatui::widgets::Borders;
-use ratatui::widgets::List;
-use ratatui::widgets::ListItem;
-use ratatui::widgets::ListState;
+use ratatui::widgets;
 use ratatui::Terminal;
 
 use crate::db;
@@ -35,30 +31,43 @@ pub async fn main(database: db::Database) -> anyhow::Result<()> {
         roots.push(database.get_node(root).await?);
     }
 
-    let mut list_state = ListState::default();
+    let mut list_state = widgets::ListState::default();
     list_state.select(Some(0));
 
     loop {
+        let selected = list_state.selected().unwrap();
+
         terminal.draw(|f| {
             let size = f.size();
 
             let parts = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
                 .split(size);
 
-            let items: Vec<ListItem> = roots
+            let items: Vec<widgets::ListItem> = roots
                 .iter()
-                .map(|node| ListItem::new(node.title.as_str()))
+                .map(|node| widgets::ListItem::new(node.title.as_str()))
                 .collect();
-            let list = List::new(items)
-                .block(Block::default().title("Nodes").borders(Borders::ALL))
+            let list = widgets::List::new(items)
+                .block(
+                    widgets::Block::default()
+                        .title("Nodes")
+                        .borders(widgets::Borders::ALL),
+                )
                 .highlight_symbol(">>");
 
-            let block = Block::default().title("Block").borders(Borders::ALL);
+            let selected_node = &roots[selected];
+            let paragraph = widgets::Paragraph::new(selected_node.description.clone())
+                .wrap(widgets::Wrap { trim: false })
+                .block(
+                    widgets::Block::default()
+                        .title(format!(" [[ {} ]] ", selected_node.title.clone()))
+                        .borders(widgets::Borders::ALL),
+                );
 
             f.render_stateful_widget(list, parts[0], &mut list_state);
-            f.render_widget(block, parts[1]);
+            f.render_widget(paragraph, parts[1]);
         })?;
 
         if !event::poll(Duration::from_millis(1000))? {
@@ -73,13 +82,12 @@ pub async fn main(database: db::Database) -> anyhow::Result<()> {
             break;
         }
 
-	let selected = list_state.selected().unwrap();
-	if evt.code == KeyCode::Up && selected > 0 {
-	    list_state.select(Some(selected - 1));
-	}
-	if evt.code == KeyCode::Down && selected < roots.len() - 1 {
-	    list_state.select(Some(selected + 1));
-	}
+        if evt.code == KeyCode::Up && selected > 0 {
+            list_state.select(Some(selected - 1));
+        }
+        if evt.code == KeyCode::Down && selected < roots.len() - 1 {
+            list_state.select(Some(selected + 1));
+        }
     }
 
     Ok(())
