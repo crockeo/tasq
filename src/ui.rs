@@ -1,3 +1,9 @@
+use std::time::Duration;
+
+use crossterm::event;
+use crossterm::event::Event;
+use crossterm::event::KeyCode;
+use crossterm::event::KeyModifiers;
 use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::enable_raw_mode;
 use ratatui::backend::CrosstermBackend;
@@ -18,7 +24,7 @@ pub async fn main(database: db::Database) -> anyhow::Result<()> {
     print!("{}[2J]", 27 as char);
 
     let stdout = std::io::stdout();
-    let _ = RawModeGuard::new();
+    let _raw_mode = RawModeGuard::new()?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
@@ -32,34 +38,54 @@ pub async fn main(database: db::Database) -> anyhow::Result<()> {
     let mut list_state = ListState::default();
     list_state.select(Some(0));
 
-    terminal.draw(|f| {
-        let size = f.size();
+    loop {
+        terminal.draw(|f| {
+            let size = f.size();
 
-        let parts = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(size);
+            let parts = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(size);
 
-        let items: Vec<ListItem> = roots
-            .iter()
-            .map(|node| ListItem::new(node.title.as_str()))
-            .collect();
-        let list = List::new(items)
-            .block(Block::default().title("Nodes").borders(Borders::ALL))
-            .highlight_symbol(">>");
+            let items: Vec<ListItem> = roots
+                .iter()
+                .map(|node| ListItem::new(node.title.as_str()))
+                .collect();
+            let list = List::new(items)
+                .block(Block::default().title("Nodes").borders(Borders::ALL))
+                .highlight_symbol(">>");
 
-        let block = Block::default().title("Block").borders(Borders::ALL);
+            let block = Block::default().title("Block").borders(Borders::ALL);
 
-        f.render_stateful_widget(list, parts[0], &mut list_state);
-        f.render_widget(block, parts[1]);
-    })?;
+            f.render_stateful_widget(list, parts[0], &mut list_state);
+            f.render_widget(block, parts[1]);
+        })?;
 
-    std::thread::sleep(std::time::Duration::from_secs(5));
+        if !event::poll(Duration::from_millis(1000))? {
+            continue;
+        }
+        let evt = match event::read()? {
+            Event::Key(evt) => evt,
+            _ => continue,
+        };
+
+        if evt.code == KeyCode::Char('c') && evt.modifiers.contains(KeyModifiers::CONTROL) {
+            break;
+        }
+
+	let selected = list_state.selected().unwrap();
+	if evt.code == KeyCode::Up && selected > 0 {
+	    list_state.select(Some(selected - 1));
+	}
+	if evt.code == KeyCode::Down && selected < roots.len() - 1 {
+	    list_state.select(Some(selected + 1));
+	}
+    }
 
     Ok(())
 }
 
-pub struct RawModeGuard {}
+struct RawModeGuard {}
 
 impl RawModeGuard {
     pub fn new() -> anyhow::Result<Self> {
