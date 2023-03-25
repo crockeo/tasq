@@ -115,6 +115,20 @@ impl Database {
         row.try_into()
     }
 
+    pub async fn get_active_nodes(&self) -> anyhow::Result<Vec<NodeID>> {
+        let query_str = std::include_str!("sql/get_active_nodes.sql");
+        let rows = sqlx::query(query_str)
+            .fetch_all(&mut self.pool.acquire().await?)
+            .await?;
+
+        let node_ids = rows
+            .into_iter()
+            .flat_map(|row| Uuid::try_parse(row.get(0)))
+            .collect();
+
+        Ok(node_ids)
+    }
+
     pub async fn has_children(&self, id: NodeID) -> anyhow::Result<bool> {
         let count = sqlx::query("SELECT COUNT(*) FROM edges WHERE from_uuid = ?")
             .bind(id.to_string())
