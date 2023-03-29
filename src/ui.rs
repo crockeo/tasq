@@ -3,6 +3,7 @@ use std::time::Duration;
 use crossterm::event;
 use crossterm::event::Event;
 use crossterm::event::KeyCode;
+use crossterm::event::KeyEvent;
 use crossterm::event::KeyModifiers;
 use crossterm::terminal::disable_raw_mode;
 use crossterm::terminal::enable_raw_mode;
@@ -73,34 +74,51 @@ pub async fn main(database: db::Database) -> anyhow::Result<()> {
             break;
         }
 
-        // TODO: move this into NormalState
-        if evt.code == KeyCode::Up {
-            normal_state.go_up();
-        }
-        if evt.code == KeyCode::Down {
-            normal_state.go_down();
-        }
-        if evt.code == KeyCode::Left {
-            normal_state.choose_parent(&database).await?;
-        }
-        if evt.code == KeyCode::Right {
-            normal_state.choose_current_child(&database).await?;
-        }
+        normal_state.handle_input(&database, evt).await?;
     }
 
     Ok(())
 }
 
 struct NormalState {
+    mode: NormalStateMode,
     node_path: Vec<db::Node>,
     current_node: Option<db::Node>,
     children: Vec<db::Node>,
     node_list_state: widgets::ListState,
 }
 
+#[derive(Clone, Copy)]
+enum NormalStateMode {
+    List,
+    Title,
+    Description,
+}
+
+impl NormalStateMode {
+    fn next(self) -> Self {
+        use NormalStateMode::*;
+        match self {
+            List => Title,
+            Title => Description,
+            Description => List,
+        }
+    }
+
+    fn last(self) -> Self {
+        use NormalStateMode::*;
+        match self {
+            List => Description,
+            Title => List,
+            Description => Title,
+        }
+    }
+}
+
 impl NormalState {
     async fn new(database: &db::Database) -> anyhow::Result<Self> {
         let mut state = Self {
+            mode: NormalStateMode::List,
             node_path: vec![],
             current_node: None,
             node_list_state: widgets::ListState::default(),
@@ -108,6 +126,70 @@ impl NormalState {
         };
         state.choose_node(database, None).await?;
         Ok(state)
+    }
+
+    async fn handle_input(&mut self, database: &db::Database, evt: KeyEvent) -> anyhow::Result<()> {
+        if evt.code == KeyCode::BackTab {
+            self.mode = self.mode.last();
+            self.persist_changes(database).await?;
+            return Ok(());
+        }
+        if evt.code == KeyCode::Tab {
+            self.mode = self.mode.next();
+            self.persist_changes(database).await?;
+            return Ok(());
+        }
+
+        use NormalStateMode::*;
+        match self.mode {
+            List => self.handle_list_input(database, evt).await,
+            Title => self.handle_title_input(database, evt).await,
+            Description => self.handle_description_input(database, evt).await,
+        }
+    }
+
+    async fn persist_changes(&self, database: &db::Database) -> anyhow::Result<()> {
+        let Some(selected) = self.node_list_state.selected() else {
+	    return Ok(());
+	};
+        let node = &self.children[selected];
+        database.update(node).await
+    }
+
+    async fn handle_list_input(
+        &mut self,
+        database: &db::Database,
+        evt: KeyEvent,
+    ) -> anyhow::Result<()> {
+        if evt.code == KeyCode::Up {
+            self.go_up();
+        }
+        if evt.code == KeyCode::Down {
+            self.go_down();
+        }
+        if evt.code == KeyCode::Left {
+            self.choose_parent(&database).await?;
+        }
+        if evt.code == KeyCode::Right {
+            self.choose_current_child(&database).await?;
+        }
+        Ok(())
+    }
+
+    async fn handle_title_input(
+        &mut self,
+        database: &db::Database,
+        evt: KeyEvent,
+    ) -> anyhow::Result<()> {
+	todo!()
+    }
+
+    async fn handle_description_input(
+        &mut self,
+        database: &db::Database,
+        evt: KeyEvent,
+    ) -> anyhow::Result<()> {
+	todo!()
     }
 
     async fn choose_parent(&mut self, database: &db::Database) -> anyhow::Result<()> {
