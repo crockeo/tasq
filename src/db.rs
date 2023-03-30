@@ -138,21 +138,6 @@ impl Database {
         Ok(count > 0)
     }
 
-    pub async fn get_parents(&self, id: NodeID) -> anyhow::Result<Vec<Uuid>> {
-        let query_str = std::include_str!("sql/get_parents.sql");
-        let children = sqlx::query(query_str)
-            .bind(id.to_string())
-            .fetch_all(&mut self.pool.acquire().await?)
-            .await?;
-
-        let children = children
-            .into_iter()
-            .flat_map(|row| Uuid::try_parse(row.get(0)))
-            .collect();
-
-        Ok(children)
-    }
-
     pub async fn get_children(&self, id: NodeID) -> anyhow::Result<Vec<Uuid>> {
         let query_str = std::include_str!("sql/get_children.sql");
         let children = sqlx::query(query_str)
