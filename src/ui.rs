@@ -129,6 +129,7 @@ impl NormalState {
     }
 
     async fn handle_input(&mut self, database: &db::Database, evt: KeyEvent) -> anyhow::Result<()> {
+        // TODO: make this also persist state when you exit the program
         if evt.code == KeyCode::BackTab {
             self.mode = self.mode.last();
             self.persist_changes(database).await?;
@@ -181,7 +182,19 @@ impl NormalState {
         database: &db::Database,
         evt: KeyEvent,
     ) -> anyhow::Result<()> {
-	todo!()
+        let Some(selected) = self.node_list_state.selected() else { return Ok(()); };
+        let selected_node = &mut self.children[selected];
+
+        match evt.code {
+            KeyCode::Char(c) => {
+                selected_node.title.push(c);
+            }
+            KeyCode::Backspace => {
+                selected_node.title.pop();
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn handle_description_input(
@@ -189,7 +202,22 @@ impl NormalState {
         database: &db::Database,
         evt: KeyEvent,
     ) -> anyhow::Result<()> {
-	todo!()
+        let Some(selected) = self.node_list_state.selected() else { return Ok(()); };
+        let selected_node = &mut self.children[selected];
+
+        match evt.code {
+            KeyCode::Char(c) => {
+                selected_node.description.push(c);
+            }
+            KeyCode::Enter => {
+                selected_node.description.push('\n');
+            }
+            KeyCode::Backspace => {
+                selected_node.description.pop();
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn choose_parent(&mut self, database: &db::Database) -> anyhow::Result<()> {

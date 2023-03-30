@@ -82,7 +82,7 @@ impl Database {
     pub async fn update(&self, node: &Node) -> anyhow::Result<()> {
         self.exists_check(&node.id).await?;
 
-        let query_str = std::include_str!("sql/insert_node.sql");
+        let query_str = std::include_str!("sql/update_node.sql");
         let query = sqlx::query(query_str)
             .bind(&node.title)
             .bind(&node.description)
