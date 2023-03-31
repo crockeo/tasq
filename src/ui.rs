@@ -328,6 +328,36 @@ impl NormalState {
             );
 
         f.render_widget(paragraph, parts[1]);
+
+	// TODO: fix some things with this:
+	// - replace `.len()`s with something that represents the rune-length of a line
+	// - handle wrapping
+	//   - make the `x` coordinate fit horizontally along the rune-length of the last section of a wrapped line
+	//   - make the `y` coordinate account for the vertical length of wrapped lines
+        let Some(selected) = self.node_list_state.selected() else { return; };
+        use NormalStateMode::*;
+        match self.mode {
+            List => {}
+            Title => {
+                let x = parts[1].x
+                    + ("- [[ ".len() as u16)
+                    + (self.children[selected].title.len() as u16);
+                let y = 0;
+                f.set_cursor(x, y);
+            }
+            Description => {
+                let lines: Vec<&str> = self.children[selected].description.lines().collect();
+		let mut x = parts[1].x + 1;
+		if lines.len() > 0 {
+		    x += lines[lines.len() - 1].len() as u16;
+		};
+                let mut y = lines.len() as u16;
+		if y == 0 {
+		    y += 1;
+		}
+                f.set_cursor(x, y);
+            }
+        }
     }
 
     fn title(&self) -> String {
