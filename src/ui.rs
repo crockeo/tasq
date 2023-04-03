@@ -42,11 +42,13 @@ mod util;
 //       - n -> next
 //     - for each sub mode: render normal mode behind them
 //   - add
-//     - TODO
+//     - tab = swap between title / description
+//     - Ctrl+F = finalize
+//     - TODO: set things like scheduled and due dates
 //   - find
 //     - up = select up
 //     - down = select down
-//     - enter = choose currently selected node
+//     - Ctrl+F = choose currently selected node
 //     - everything else = normal text editing!
 //   - connect
 //     - TODO
