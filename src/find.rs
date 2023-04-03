@@ -15,6 +15,14 @@ pub struct Args {
 }
 
 pub async fn main(args: Args, database: db::Database) -> anyhow::Result<()> {
+    let candidates = find_candidates(&args.text, &database).await?;
+    for (candidate, _) in candidates.into_iter() {
+        println!("{} {}", candidate.title, candidate.id);
+    }
+    Ok(())
+}
+
+pub async fn find_candidates(search_string: &str, database: &db::Database) -> anyhow::Result<Vec<(db::Node, usize)>> {
     // (1) find all active nodes in the database
     let active_nodes = database.get_active_nodes().await?;
 
@@ -28,20 +36,15 @@ pub async fn main(args: Args, database: db::Database) -> anyhow::Result<()> {
         //   (b) don't be ok with a lot of deletions / replacements
         //       b/c that means they're probably typing something else
         //   (c) also simimlar thing for replacement cost
-        let distance = levenshtein_distance(&args.text, &node.title);
+        let distance = levenshtein_distance(search_string, &node.title);
 
         // (4) filter to only show things which are above a certain level of confidence
         if distance < MAX_DISTANCE {
-	    println!("{} {} {}", args.text, node.title, distance);
-            candidates.push(node);
+            candidates.push((node, distance));
         }
     }
 
-    for candidate in candidates.into_iter() {
-        println!("{} {}", candidate.title, candidate.id);
-    }
-
-    Ok(())
+    Ok(candidates)
 }
 
 fn levenshtein_distance(from: &str, to: &str) -> usize {
