@@ -20,6 +20,8 @@ use ratatui::Terminal;
 use crate::db;
 use crate::find::find_candidates;
 
+mod util;
+
 // TODO: this code is really bad as-is
 // because i've been optimizing for iteration
 // and not thinking about structuring it "well."
@@ -50,6 +52,19 @@ use crate::find::find_candidates;
 //     - TODO
 //   - next
 //     - TODO
+
+// TODO: turn these into shared widgets?
+// noticing some common components:
+//
+// - text editing
+//   - single-line text editor
+//   - multi-line (paragraph) text editor
+// - modal dialog
+//   - a dialog on top of the parent screen
+//   - renders "on top of" the parent
+// - the find dialog
+//   - top-level find going to a node
+//   - finding another node to connect to
 
 pub async fn main(database: db::Database) -> anyhow::Result<()> {
     // Magic spell to clear the screen with an ANSI escape code.
@@ -87,6 +102,7 @@ pub async fn main(database: db::Database) -> anyhow::Result<()> {
 
 enum Mode {
     Normal(NormalState),
+    Add(AddState),
     Find(FindState),
 }
 
@@ -95,6 +111,7 @@ impl Mode {
         use Mode::*;
         match self {
             Normal(state) => state.handle_input(database, evt).await,
+            Add(state) => state.handle_input(database, evt).await,
             Find(state) => state.handle_input(database, evt).await,
         }
     }
@@ -103,17 +120,10 @@ impl Mode {
         use Mode::*;
         match self {
             Normal(state) => state.render(f),
+            Add(state) => state.render(f),
             Find(state) => state.render(f),
         }
     }
-}
-
-struct NormalState {
-    mode: NormalStateMode,
-    node_path: Vec<db::Node>,
-    current_node: Option<db::Node>,
-    children: Vec<db::Node>,
-    node_list_state: widgets::ListState,
 }
 
 #[derive(Clone, Copy)]
@@ -143,16 +153,24 @@ impl NormalStateMode {
     }
 }
 
+struct NormalState {
+    mode: NormalStateMode,
+    node_path: Vec<db::Node>,
+    current_node: Option<db::Node>,
+    children: Vec<db::Node>,
+    node_list_state: widgets::ListState,
+}
+
 impl NormalState {
     async fn new(database: &db::Database, root: Option<db::Node>) -> anyhow::Result<Self> {
         let mut state = Self {
             mode: NormalStateMode::List,
             node_path: vec![],
-            current_node: None,
+            current_node: root,
             node_list_state: widgets::ListState::default(),
             children: vec![],
         };
-        state.choose_node(database, root).await?;
+	state.refresh(database).await?;
         Ok(state)
     }
 
@@ -174,11 +192,21 @@ impl NormalState {
         }
 
         use NormalStateMode::*;
-        match self.mode {
-            List => return self.handle_list_input(database, evt).await,
-            Title => self.handle_title_input(evt),
-            Description => self.handle_description_input(evt),
-        }
+	if let List = &self.mode {
+	    return self.handle_list_input(database, evt).await;
+	}
+
+	let Some(selected) = self.node_list_state.selected() else {
+	    return Ok(Mode::Normal(self));
+	};
+	let node = &mut self.children[selected];
+
+	match self.mode {
+	    List => unreachable!("This should be handled above..."),
+	    Title => util::handle_input_single_line(&mut node.title, evt),
+	    Description => util::handle_input_multi_line(&mut node.description, evt),
+	}
+
         Ok(Mode::Normal(self))
     }
 
@@ -195,6 +223,9 @@ impl NormalState {
         database: &db::Database,
         evt: KeyEvent,
     ) -> anyhow::Result<Mode> {
+        if evt.code == KeyCode::Char('a') {
+            return Ok(Mode::Add(AddState::new(self)));
+        }
         if evt.code == KeyCode::Char('f') {
             return Ok(Mode::Find(FindState::new(database, self).await?));
         }
@@ -212,39 +243,6 @@ impl NormalState {
             self.choose_current_child(&database).await?;
         }
         Ok(Mode::Normal(self))
-    }
-
-    fn handle_title_input(&mut self, evt: KeyEvent) {
-        let Some(selected) = self.node_list_state.selected() else { return };
-        let selected_node = &mut self.children[selected];
-
-        match evt.code {
-            KeyCode::Char(c) => {
-                selected_node.title.push(c);
-            }
-            KeyCode::Backspace => {
-                selected_node.title.pop();
-            }
-            _ => {}
-        }
-    }
-
-    fn handle_description_input(&mut self, evt: KeyEvent) {
-        let Some(selected) = self.node_list_state.selected() else { return };
-        let selected_node = &mut self.children[selected];
-
-        match evt.code {
-            KeyCode::Char(c) => {
-                selected_node.description.push(c);
-            }
-            KeyCode::Enter => {
-                selected_node.description.push('\n');
-            }
-            KeyCode::Backspace => {
-                selected_node.description.pop();
-            }
-            _ => {}
-        }
     }
 
     async fn choose_parent(&mut self, database: &db::Database) -> anyhow::Result<()> {
@@ -288,6 +286,10 @@ impl NormalState {
         if selected < self.children.len() - 1 {
             self.node_list_state.select(Some(selected + 1));
         }
+    }
+
+    async fn refresh(&mut self, database: &db::Database) -> anyhow::Result<()> {
+	self.choose_node(database, self.current_node.clone()).await
     }
 
     async fn choose_node(
@@ -366,22 +368,14 @@ impl NormalState {
         match self.mode {
             List => {}
             Title => {
-                let x = parts[1].x
-                    + ("- [[ ".len() as u16)
-                    + (self.children[selected].title.len() as u16);
-                let y = 0;
+		let (mut x, y) = util::cursor_offset(&self.children[selected].title);
+		x += parts[1].x + " [[ ".len() as u16;
                 f.set_cursor(x, y);
             }
             Description => {
-                let lines: Vec<&str> = self.children[selected].description.lines().collect();
-                let mut x = parts[1].x + 1;
-                if lines.len() > 0 {
-                    x += lines[lines.len() - 1].len() as u16;
-                };
-                let mut y = lines.len() as u16;
-                if y == 0 {
-                    y += 1;
-                }
+		let (mut x, mut y) = util::cursor_offset(&self.children[selected].description);
+		x += parts[1].x;
+		y += 1;
                 f.set_cursor(x, y);
             }
         }
@@ -392,6 +386,116 @@ impl NormalState {
             None => "Root".to_string(),
             Some(node) => node.title.clone(),
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum AddStateMode {
+    Title,
+    Description,
+}
+
+impl AddStateMode {
+    fn next(self) -> Self {
+        use AddStateMode::*;
+        match self {
+            Title => Description,
+            Description => Title,
+        }
+    }
+}
+
+struct AddState {
+    parent: NormalState,
+    mode: AddStateMode,
+    node: db::Node,
+}
+
+impl AddState {
+    fn new(parent: NormalState) -> Self {
+        AddState {
+            parent,
+            mode: AddStateMode::Title,
+            node: db::Node::new(),
+        }
+    }
+
+    async fn handle_input(
+        mut self,
+        database: &db::Database,
+        evt: KeyEvent,
+    ) -> anyhow::Result<Mode> {
+        let is_ctrl_g =
+            evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('g');
+        if evt.code == KeyCode::Esc || is_ctrl_g {
+            return Ok(Mode::Normal(self.parent));
+        }
+
+        if evt.code == KeyCode::Tab || evt.code == KeyCode::BackTab {
+            self.mode = self.mode.next();
+        }
+
+	if evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('f') {
+	    database.add(&self.node).await?;
+	    if let Some(current_node) = &self.parent.current_node {
+		database.connect(current_node.id, self.node.id).await?;
+	    }
+	    self.parent.refresh(database).await?;
+	    return Ok(Mode::Normal(self.parent))
+	}
+
+        use AddStateMode::*;
+        match self.mode {
+            Title => util::handle_input_single_line(&mut self.node.title, evt),
+            Description => util::handle_input_multi_line(&mut self.node.description, evt),
+        }
+
+        Ok(Mode::Add(self))
+    }
+
+    fn render(&mut self, f: &mut Frame<impl Backend>) {
+        self.parent.render(f);
+
+        let rect = {
+            let margin = layout::Margin {
+                horizontal: 8,
+                vertical: 4,
+            };
+            f.size().inner(&margin)
+        };
+        f.render_widget(widgets::Clear, rect);
+
+        let parts = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Percentage(100)])
+            .split(rect);
+
+        // TODO: handle rendering search strings which are longer than the width of this block
+        let top = widgets::Paragraph::new(self.node.title.clone())
+            .block(widgets::Block::default().borders(widgets::Borders::all()));
+        f.render_widget(top, parts[0]);
+
+        let bottom = widgets::Paragraph::new(self.node.description.clone())
+            .block(widgets::Block::default().borders(widgets::Borders::all()));
+        f.render_widget(bottom, parts[1]);
+
+	use AddStateMode::*;
+	match self.mode {
+	    Title => {
+		let (x, y) = util::cursor_offset(&self.node.title);
+		f.set_cursor(
+		    x + parts[0].x,
+		    y + parts[0].y + 1,
+		);
+	    },
+	    Description => {
+		let (x, y) = util::cursor_offset(&self.node.description);
+		f.set_cursor(
+		    x + parts[1].x,
+		    y + parts[1].y + 1,
+		);
+	    },
+	}
     }
 }
 
@@ -425,12 +529,14 @@ impl FindState {
             return Ok(Mode::Normal(self.parent));
         }
 
+	if evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('f') {
+	    return self.choose(database).await;
+	}
+
         let mut string_changed = false;
         match evt.code {
             KeyCode::Up => self.go_up(),
             KeyCode::Down => self.go_down(),
-
-            KeyCode::Enter => return self.choose(database).await,
 
             KeyCode::Char(c) => {
                 self.search_string.push(c);
