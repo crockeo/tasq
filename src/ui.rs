@@ -176,8 +176,8 @@ impl NormalState {
         use NormalStateMode::*;
         match self.mode {
             List => return self.handle_list_input(database, evt).await,
-            Title => self.handle_title_input(database, evt).await?,
-            Description => self.handle_description_input(database, evt).await?,
+            Title => self.handle_title_input(evt),
+            Description => self.handle_description_input(evt),
         }
         Ok(Mode::Normal(self))
     }
@@ -214,12 +214,8 @@ impl NormalState {
         Ok(Mode::Normal(self))
     }
 
-    async fn handle_title_input(
-        &mut self,
-        database: &db::Database,
-        evt: KeyEvent,
-    ) -> anyhow::Result<()> {
-        let Some(selected) = self.node_list_state.selected() else { return Ok(()); };
+    fn handle_title_input(&mut self, evt: KeyEvent) {
+        let Some(selected) = self.node_list_state.selected() else { return };
         let selected_node = &mut self.children[selected];
 
         match evt.code {
@@ -231,15 +227,10 @@ impl NormalState {
             }
             _ => {}
         }
-        Ok(())
     }
 
-    async fn handle_description_input(
-        &mut self,
-        database: &db::Database,
-        evt: KeyEvent,
-    ) -> anyhow::Result<()> {
-        let Some(selected) = self.node_list_state.selected() else { return Ok(()); };
+    fn handle_description_input(&mut self, evt: KeyEvent) {
+        let Some(selected) = self.node_list_state.selected() else { return };
         let selected_node = &mut self.children[selected];
 
         match evt.code {
@@ -254,7 +245,6 @@ impl NormalState {
             }
             _ => {}
         }
-        Ok(())
     }
 
     async fn choose_parent(&mut self, database: &db::Database) -> anyhow::Result<()> {
