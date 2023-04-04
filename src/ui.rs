@@ -13,7 +13,7 @@ use ratatui::layout;
 use ratatui::layout::Constraint;
 use ratatui::layout::Direction;
 use ratatui::layout::Layout;
-use ratatui::widgets;
+use ratatui::widgets as rwidgets;
 use ratatui::Frame;
 use ratatui::Terminal;
 
@@ -21,6 +21,7 @@ use crate::db;
 use crate::find::find_candidates;
 
 mod util;
+mod widgets;
 
 // TODO: this code is really bad as-is
 // because i've been optimizing for iteration
@@ -160,7 +161,7 @@ struct NormalState {
     node_path: Vec<db::Node>,
     current_node: Option<db::Node>,
     children: Vec<db::Node>,
-    node_list_state: widgets::ListState,
+    node_list_state: rwidgets::ListState,
 }
 
 impl NormalState {
@@ -169,7 +170,7 @@ impl NormalState {
             mode: NormalStateMode::List,
             node_path: vec![],
             current_node: root,
-            node_list_state: widgets::ListState::default(),
+            node_list_state: rwidgets::ListState::default(),
             children: vec![],
         };
         state.refresh(database).await?;
@@ -329,16 +330,16 @@ impl NormalState {
             .constraints([Constraint::Percentage(30), Constraint::Percentage(70)])
             .split(size);
 
-        let items: Vec<widgets::ListItem> = self
+        let items: Vec<rwidgets::ListItem> = self
             .children
             .iter()
-            .map(|node| widgets::ListItem::new(node.title.as_str()))
+            .map(|node| rwidgets::ListItem::new(node.title.as_str()))
             .collect();
-        let list = widgets::List::new(items)
+        let list = rwidgets::List::new(items)
             .block(
-                widgets::Block::default()
+                rwidgets::Block::default()
                     .title(self.title())
-                    .borders(widgets::Borders::ALL),
+                    .borders(rwidgets::Borders::ALL),
             )
             .highlight_symbol(">>");
         f.render_stateful_widget(list, parts[0], &mut self.node_list_state);
@@ -350,12 +351,12 @@ impl NormalState {
                 (node.title.clone(), node.description.clone())
             }
         };
-        let paragraph = widgets::Paragraph::new(body)
-            .wrap(widgets::Wrap { trim: false })
+        let paragraph = rwidgets::Paragraph::new(body)
+            .wrap(rwidgets::Wrap { trim: false })
             .block(
-                widgets::Block::default()
+                rwidgets::Block::default()
                     .title(format!(" [[ {} ]] ", title))
-                    .borders(widgets::Borders::ALL),
+                    .borders(rwidgets::Borders::ALL),
             );
 
         f.render_widget(paragraph, parts[1]);
@@ -391,34 +392,16 @@ impl NormalState {
     }
 }
 
-#[derive(Clone, Copy)]
-enum AddStateMode {
-    Title,
-    Description,
-}
-
-impl AddStateMode {
-    fn next(self) -> Self {
-        use AddStateMode::*;
-        match self {
-            Title => Description,
-            Description => Title,
-        }
-    }
-}
-
 struct AddState {
     parent: NormalState,
-    mode: AddStateMode,
-    node: db::Node,
+    node_editor_state: widgets::NodeEditorState,
 }
 
 impl AddState {
     fn new(parent: NormalState) -> Self {
         AddState {
             parent,
-            mode: AddStateMode::Title,
-            node: db::Node::new(),
+	    node_editor_state: widgets::NodeEditorState::new(Some(db::Node::new())),
         }
     }
 
@@ -433,24 +416,17 @@ impl AddState {
             return Ok(Mode::Normal(self.parent));
         }
 
-        if evt.code == KeyCode::Tab || evt.code == KeyCode::BackTab {
-            self.mode = self.mode.next();
-        }
-
         if evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('f') {
-            database.add(&self.node).await?;
+	    let node = self.node_editor_state.node().unwrap();
+            database.add(node).await?;
             if let Some(current_node) = &self.parent.current_node {
-                database.connect(current_node.id, self.node.id).await?;
+                database.connect(current_node.id, node.id).await?;
             }
             self.parent.refresh(database).await?;
             return Ok(Mode::Normal(self.parent));
         }
 
-        use AddStateMode::*;
-        match self.mode {
-            Title => util::handle_input_single_line(&mut self.node.title, evt),
-            Description => util::handle_input_multi_line(&mut self.node.description, evt),
-        }
+	self.node_editor_state.handle_input(evt);
 
         Ok(Mode::Add(self))
     }
@@ -458,50 +434,21 @@ impl AddState {
     fn render(&mut self, f: &mut Frame<impl Backend>) {
         self.parent.render(f);
 
-        let outer_rect = {
+        let rect = {
             let margin = layout::Margin {
                 horizontal: 8,
                 vertical: 4,
             };
             f.size().inner(&margin)
         };
-        f.render_widget(widgets::Clear, outer_rect);
+        f.render_widget(rwidgets::Clear, rect);
 
-        let block = widgets::Block::default()
-            .title("Add")
-            .borders(widgets::Borders::all());
-        f.render_widget(block, outer_rect);
+	let node_editor = widgets::NodeEditor::default();
+	f.render_stateful_widget(node_editor, rect, &mut self.node_editor_state);
 
-        let rect = outer_rect.inner(&layout::Margin {
-            horizontal: 1,
-            vertical: 1,
-        });
-
-        let parts = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(3), Constraint::Percentage(100)])
-            .split(rect);
-
-        // TODO: handle rendering search strings which are longer than the width of this block
-        let top = widgets::Paragraph::new(self.node.title.clone())
-            .block(widgets::Block::default().borders(widgets::Borders::all()));
-        f.render_widget(top, parts[0]);
-
-        let bottom = widgets::Paragraph::new(self.node.description.clone())
-            .block(widgets::Block::default().borders(widgets::Borders::all()));
-        f.render_widget(bottom, parts[1]);
-
-        use AddStateMode::*;
-        match self.mode {
-            Title => {
-                let (x, y) = util::cursor_offset(&self.node.title);
-                f.set_cursor(x + parts[0].x, y + parts[0].y + 1);
-            }
-            Description => {
-                let (x, y) = util::cursor_offset(&self.node.description);
-                f.set_cursor(x + parts[1].x, y + parts[1].y + 1);
-            }
-        }
+	if let Some((x, y)) = self.node_editor_state.cursor_offset(rect) {
+	    f.set_cursor(x, y);
+	}
     }
 }
 
@@ -509,7 +456,7 @@ struct FindState {
     parent: NormalState,
     search_string: String,
     candidates: Vec<db::Node>,
-    candidate_list_state: widgets::ListState,
+    candidate_list_state: rwidgets::ListState,
 }
 
 impl FindState {
@@ -518,7 +465,7 @@ impl FindState {
             parent,
             search_string: "".to_string(),
             candidates: vec![],
-            candidate_list_state: widgets::ListState::default(),
+            candidate_list_state: rwidgets::ListState::default(),
         };
         find_state.update_search_candidates(database).await?;
         Ok(find_state)
@@ -607,7 +554,7 @@ impl FindState {
             };
             f.size().inner(&margin)
         };
-        f.render_widget(widgets::Clear, rect);
+        f.render_widget(rwidgets::Clear, rect);
 
         let parts = Layout::default()
             .direction(Direction::Vertical)
@@ -615,21 +562,21 @@ impl FindState {
             .split(rect);
 
         // TODO: handle rendering search strings which are longer than the width of this block
-        let top = widgets::Paragraph::new(self.search_string.clone())
-            .block(widgets::Block::default().borders(widgets::Borders::all()));
+        let top = rwidgets::Paragraph::new(self.search_string.clone())
+            .block(rwidgets::Block::default().borders(rwidgets::Borders::all()));
         f.render_widget(top, parts[0]);
         f.set_cursor(
             parts[0].x + 1 + self.search_string.len() as u16,
             parts[0].y + 1,
         );
 
-        let bottom = widgets::List::new(
+        let bottom = rwidgets::List::new(
             self.candidates
                 .iter()
-                .map(|node| widgets::ListItem::new(node.title.to_owned()))
-                .collect::<Vec<widgets::ListItem>>(),
+                .map(|node| rwidgets::ListItem::new(node.title.to_owned()))
+                .collect::<Vec<rwidgets::ListItem>>(),
         )
-        .block(widgets::Block::default().borders(widgets::Borders::all()))
+        .block(rwidgets::Block::default().borders(rwidgets::Borders::all()))
         .highlight_symbol(">>");
         f.render_stateful_widget(bottom, parts[1], &mut self.candidate_list_state);
     }
