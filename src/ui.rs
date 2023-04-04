@@ -172,7 +172,7 @@ impl NormalState {
             node_list_state: widgets::ListState::default(),
             children: vec![],
         };
-	state.refresh(database).await?;
+        state.refresh(database).await?;
         Ok(state)
     }
 
@@ -194,20 +194,20 @@ impl NormalState {
         }
 
         use NormalStateMode::*;
-	if let List = &self.mode {
-	    return self.handle_list_input(database, evt).await;
-	}
+        if let List = &self.mode {
+            return self.handle_list_input(database, evt).await;
+        }
 
-	let Some(selected) = self.node_list_state.selected() else {
+        let Some(selected) = self.node_list_state.selected() else {
 	    return Ok(Mode::Normal(self));
 	};
-	let node = &mut self.children[selected];
+        let node = &mut self.children[selected];
 
-	match self.mode {
-	    List => unreachable!("This should be handled above..."),
-	    Title => util::handle_input_single_line(&mut node.title, evt),
-	    Description => util::handle_input_multi_line(&mut node.description, evt),
-	}
+        match self.mode {
+            List => unreachable!("This should be handled above..."),
+            Title => util::handle_input_single_line(&mut node.title, evt),
+            Description => util::handle_input_multi_line(&mut node.description, evt),
+        }
 
         Ok(Mode::Normal(self))
     }
@@ -291,7 +291,7 @@ impl NormalState {
     }
 
     async fn refresh(&mut self, database: &db::Database) -> anyhow::Result<()> {
-	self.choose_node(database, self.current_node.clone()).await
+        self.choose_node(database, self.current_node.clone()).await
     }
 
     async fn choose_node(
@@ -370,14 +370,14 @@ impl NormalState {
         match self.mode {
             List => {}
             Title => {
-		let (mut x, y) = util::cursor_offset(&self.children[selected].title);
-		x += parts[1].x + " [[ ".len() as u16;
+                let (mut x, y) = util::cursor_offset(&self.children[selected].title);
+                x += parts[1].x + " [[ ".len() as u16;
                 f.set_cursor(x, y);
             }
             Description => {
-		let (mut x, mut y) = util::cursor_offset(&self.children[selected].description);
-		x += parts[1].x;
-		y += 1;
+                let (mut x, mut y) = util::cursor_offset(&self.children[selected].description);
+                x += parts[1].x;
+                y += 1;
                 f.set_cursor(x, y);
             }
         }
@@ -437,14 +437,14 @@ impl AddState {
             self.mode = self.mode.next();
         }
 
-	if evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('f') {
-	    database.add(&self.node).await?;
-	    if let Some(current_node) = &self.parent.current_node {
-		database.connect(current_node.id, self.node.id).await?;
-	    }
-	    self.parent.refresh(database).await?;
-	    return Ok(Mode::Normal(self.parent))
-	}
+        if evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('f') {
+            database.add(&self.node).await?;
+            if let Some(current_node) = &self.parent.current_node {
+                database.connect(current_node.id, self.node.id).await?;
+            }
+            self.parent.refresh(database).await?;
+            return Ok(Mode::Normal(self.parent));
+        }
 
         use AddStateMode::*;
         match self.mode {
@@ -458,14 +458,24 @@ impl AddState {
     fn render(&mut self, f: &mut Frame<impl Backend>) {
         self.parent.render(f);
 
-        let rect = {
+        let outer_rect = {
             let margin = layout::Margin {
                 horizontal: 8,
                 vertical: 4,
             };
             f.size().inner(&margin)
         };
-        f.render_widget(widgets::Clear, rect);
+        f.render_widget(widgets::Clear, outer_rect);
+
+        let block = widgets::Block::default()
+            .title("Add")
+            .borders(widgets::Borders::all());
+        f.render_widget(block, outer_rect);
+
+        let rect = outer_rect.inner(&layout::Margin {
+            horizontal: 1,
+            vertical: 1,
+        });
 
         let parts = Layout::default()
             .direction(Direction::Vertical)
@@ -481,23 +491,17 @@ impl AddState {
             .block(widgets::Block::default().borders(widgets::Borders::all()));
         f.render_widget(bottom, parts[1]);
 
-	use AddStateMode::*;
-	match self.mode {
-	    Title => {
-		let (x, y) = util::cursor_offset(&self.node.title);
-		f.set_cursor(
-		    x + parts[0].x,
-		    y + parts[0].y + 1,
-		);
-	    },
-	    Description => {
-		let (x, y) = util::cursor_offset(&self.node.description);
-		f.set_cursor(
-		    x + parts[1].x,
-		    y + parts[1].y + 1,
-		);
-	    },
-	}
+        use AddStateMode::*;
+        match self.mode {
+            Title => {
+                let (x, y) = util::cursor_offset(&self.node.title);
+                f.set_cursor(x + parts[0].x, y + parts[0].y + 1);
+            }
+            Description => {
+                let (x, y) = util::cursor_offset(&self.node.description);
+                f.set_cursor(x + parts[1].x, y + parts[1].y + 1);
+            }
+        }
     }
 }
 
@@ -531,9 +535,9 @@ impl FindState {
             return Ok(Mode::Normal(self.parent));
         }
 
-	if evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('f') {
-	    return self.choose(database).await;
-	}
+        if evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('f') {
+            return self.choose(database).await;
+        }
 
         let mut string_changed = false;
         match evt.code {
