@@ -156,12 +156,13 @@ impl NormalStateMode {
     }
 }
 
+// TODO: migrate over NormalState to use NodeEditor widget
 struct NormalState {
     mode: NormalStateMode,
     node_path: Vec<db::Node>,
-    current_node: Option<db::Node>,
     children: Vec<db::Node>,
     node_list_state: rwidgets::ListState,
+    node_editor_state: widgets::NodeEditorState,
 }
 
 impl NormalState {
@@ -169,9 +170,9 @@ impl NormalState {
         let mut state = Self {
             mode: NormalStateMode::List,
             node_path: vec![],
-            current_node: root,
-            node_list_state: rwidgets::ListState::default(),
             children: vec![],
+            node_list_state: rwidgets::ListState::default(),
+            node_editor_state: widgets::NodeEditorState::new(root),
         };
         state.refresh(database).await?;
         Ok(state)
@@ -250,7 +251,7 @@ impl NormalState {
 
     async fn choose_parent(&mut self, database: &db::Database) -> anyhow::Result<()> {
         let next = self.node_path.pop();
-        if let (None, None) = (&self.current_node, &next) {
+        if let (None, None) = (self.node_editor_state.node(), &next) {
             return Ok(());
         }
         self.choose_node(database, next).await
@@ -261,7 +262,7 @@ impl NormalState {
             return Ok(());
         }
 
-        if let Some(current_node) = &self.current_node {
+        if let Some(current_node) = self.node_editor_state.node() {
             self.node_path.push(current_node.clone());
         };
         let selected = self.node_list_state.selected().unwrap();
@@ -292,7 +293,8 @@ impl NormalState {
     }
 
     async fn refresh(&mut self, database: &db::Database) -> anyhow::Result<()> {
-        self.choose_node(database, self.current_node.clone()).await
+        self.choose_node(database, self.node_editor_state.node().map(db::Node::clone))
+            .await
     }
 
     async fn choose_node(
@@ -311,7 +313,7 @@ impl NormalState {
             }
             children
         };
-        self.current_node = node;
+        self.node_editor_state.select(node);
 
         if self.children.len() == 0 {
             self.node_list_state.select(None)
@@ -344,22 +346,8 @@ impl NormalState {
             .highlight_symbol(">>");
         f.render_stateful_widget(list, parts[0], &mut self.node_list_state);
 
-        let (title, body) = match self.node_list_state.selected() {
-            None => ("N/A".to_string(), "No node selected".to_string()),
-            Some(selected) => {
-                let node = &self.children[selected];
-                (node.title.clone(), node.description.clone())
-            }
-        };
-        let paragraph = rwidgets::Paragraph::new(body)
-            .wrap(rwidgets::Wrap { trim: false })
-            .block(
-                rwidgets::Block::default()
-                    .title(format!(" [[ {} ]] ", title))
-                    .borders(rwidgets::Borders::ALL),
-            );
-
-        f.render_widget(paragraph, parts[1]);
+	let node_editor = widgets::NodeEditor::default();
+	f.render_stateful_widget(node_editor, parts[1], &mut self.node_editor_state);
 
         // TODO: fix some things with this:
         // - replace `.len()`s with something that represents the rune-length of a line
@@ -385,7 +373,7 @@ impl NormalState {
     }
 
     fn title(&self) -> String {
-        match &self.current_node {
+        match &self.node_editor_state.node() {
             None => "Root".to_string(),
             Some(node) => node.title.clone(),
         }
@@ -401,7 +389,7 @@ impl AddState {
     fn new(parent: NormalState) -> Self {
         AddState {
             parent,
-	    node_editor_state: widgets::NodeEditorState::new(Some(db::Node::new())),
+            node_editor_state: widgets::NodeEditorState::new(Some(db::Node::new())),
         }
     }
 
@@ -417,16 +405,16 @@ impl AddState {
         }
 
         if evt.modifiers.contains(KeyModifiers::CONTROL) && evt.code == KeyCode::Char('f') {
-	    let node = self.node_editor_state.node().unwrap();
+            let node = self.node_editor_state.node().unwrap();
             database.add(node).await?;
-            if let Some(current_node) = &self.parent.current_node {
+            if let Some(current_node) = self.parent.node_editor_state.node() {
                 database.connect(current_node.id, node.id).await?;
             }
             self.parent.refresh(database).await?;
             return Ok(Mode::Normal(self.parent));
         }
 
-	self.node_editor_state.handle_input(evt);
+        self.node_editor_state.handle_input(evt);
 
         Ok(Mode::Add(self))
     }
@@ -443,12 +431,12 @@ impl AddState {
         };
         f.render_widget(rwidgets::Clear, rect);
 
-	let node_editor = widgets::NodeEditor::default();
-	f.render_stateful_widget(node_editor, rect, &mut self.node_editor_state);
+        let node_editor = widgets::NodeEditor::default();
+        f.render_stateful_widget(node_editor, rect, &mut self.node_editor_state);
 
-	if let Some((x, y)) = self.node_editor_state.cursor_offset(rect) {
-	    f.set_cursor(x, y);
-	}
+        if let Some((x, y)) = self.node_editor_state.cursor_offset(rect) {
+            f.set_cursor(x, y);
+        }
     }
 }
 
